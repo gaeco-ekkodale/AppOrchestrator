@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <g id="whaleShape" transform="translate(14, 28) scale(0.55)">
+         <rect x="19" y="-7" width="7.5" height="7.5"/>
+         <rect x="28" y="-7" width="7.5" height="7.5"/>
+         <rect x="28" y="-16" width="7.5" height="7.5"/>
+         <rect x="10" y="2" width="7.5" height="7.5"/>
+         <rect x="19" y="2" width="7.5" height="7.5"/>
+         <rect x="28" y="2" width="7.5" height="7.5"/>
+         <path d="M2 11 Q 2 34 45 28 C 48 27 58 14 60 12 C 55 18 50 24 45 24 L 45 11 Z" />
+    </g>
+    
+    <mask id="cleanMask">
+      <rect x="0" y="0" width="64" height="64" fill="white"/>
+      <use href="#whaleShape" fill="black" />
+    </mask>
+  </defs>
+
+  <g mask="url(#cleanMask)" fill="none" stroke="#0d0599" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="32" cy="12" rx="26" ry="8" />
+      <path d="M6 12 L 6 52 C 6 58 18 61 32 61 C 46 61 58 58 58 52 L 58 12" />
+      <path d="M6 26 C 6 32 18 35 32 35 C 46 35 58 32 58 26" />
+      <path d="M6 40 C 6 46 18 49 32 49 C 46 49 58 46 58 40" />
+  </g>
+
+  <use href="#whaleShape" fill="none" stroke="#0d0599" stroke-width="3" stroke-linejoin="round" />
+</svg>

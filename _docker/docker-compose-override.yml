@@ -1,0 +1,77 @@
+# Copyright (c) 2025 Ekkodale GmbH. All rights reserved.
+#
+# This file is part of the gaeco platform system.
+#
+# Use of this file is governed by the terms of the license
+# in LICENSE.md at the root of this repository.
+# Unauthorized copying, modification, distribution, or use of this file,
+# via any medium, is strictly prohibited except as expressly permitted
+# under that license.
+
+# ============================================================================
+# Docker Compose Override - Local Development
+# ============================================================================
+# This file overrides settings from docker-compose.yml for local development.
+# It exposes ports, enables local builds, and configures Keycloak realm import.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose-override.yml up
+# ============================================================================
+
+services:
+  apporchestrator-postgres:
+    ports:
+      - "${ORCHESTRATOR_POSTGRES_OUTERPORT}:5432"
+
+  # --------------------------------------------------------------------------
+  # App Orchestrator Backend - Local Development Override
+  # - Build from local source instead of pulling image
+  # - Expose port for direct API access
+  # --------------------------------------------------------------------------
+  apporchestrator-server:
+    ports:
+      - "${ORCHESTRATOR_SERVER_OUTERPORT}:80"
+    build:
+      context: ../Service
+      dockerfile: Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Local dev / bootstrap: no Keycloak required -> run without auth (see DisabledAuthHandler).
+      Auth__Enabled: "false"
+      # Bei Auth__Enabled=true muss apporchestrator-server zusaetzlich an gaeco-network
+      # haengen, damit keycloak-server aufloesbar ist (lokal ungenutzt, da Auth off).
+      Keycloak__Host: http://keycloak-server:8080
+      Orchestrator__DockerHostUri: unix:///var/run/docker.sock
+
+  # --------------------------------------------------------------------------
+  # App Orchestrator Frontend - Local Development Override
+  # - Build from local source instead of pulling image
+  # - Expose port for direct browser access
+  # --------------------------------------------------------------------------
+  apporchestrator-client:
+    ports:
+      - "${ORCHESTRATOR_CLIENT_OUTERPORT}:80"
+    build:
+      context: ../Client
+      dockerfile: docker/Dockerfile
+    environment:
+      # Matches Auth__Enabled=false on the server (skips the OIDC login flow).
+      - VITE_AUTH_DISABLED=true
+    networks:
+      - gaeco-network
+    labels:
+      # Orchestrator-specific labels for micro-frontend integration and metadata
+      - "app.mfe.id=app-orchestrator"
+      - "app.mfe.displayName=App Orchestrator"
+      - "app.mfe.description=App Orchestrator Application"
+      - "app.mfe.iconPath=/icon.svg"
+      - "app.mfe.entrypointPath=/assets/remoteEntry.js"
+      - "app.mfe.exposedModule=App"
+      - "app.mfe.route=${MOUNT_ROUTE}"
+
+networks:
+  gaeco-network:
+    name: ${ENVIRONMENT_NETWORK}
+    external: true
+  traefik-proxy:
+    external: false

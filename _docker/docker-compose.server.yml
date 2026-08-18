@@ -1,0 +1,190 @@
+# Copyright (c) 2025 Ekkodale GmbH. All rights reserved.
+#
+# This file is part of the gaeco platform system.
+#
+# Use of this file is governed by the terms of the license
+# in LICENSE.md at the root of this repository.
+# Unauthorized copying, modification, distribution, or use of this file,
+# via any medium, is strictly prohibited except as expressly permitted
+# under that license.
+
+# ============================================================================
+# Docker Compose Configuration - App Orchestrator (Server)
+# ============================================================================
+# Services are organized in the following order:
+# 1. Infrastructure Services (Databases)
+# 2. Platform Services (Traefik, Keycloak)
+# 3. Application Services (Backend, Frontend)
+# ============================================================================
+name: app-orchestrator
+
+services:
+  # ==========================================================================
+  # 1. INFRASTRUCTURE SERVICES
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL Database for Application Orchestrator
+  # --------------------------------------------------------------------------
+  app-orchestrator-postgres:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: ${ORCHESTRATOR_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${ORCHESTRATOR_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${ORCHESTRATOR_POSTGRES_DATABASE}
+    expose:
+      - 5432
+    healthcheck:
+      test: pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ${VOLUME_BASE_PATH:-./volumes}/orchestrator/postgres/:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL Database for Keycloak
+  # --------------------------------------------------------------------------
+  keycloak-postgres:
+    image: postgres:14
+    restart: always
+    expose:
+      - 5432
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-q",
+          "-d",
+          "${KEYCLOAK_POSTGRES_DATABASE}",
+          "-U",
+          "${KEYCLOAK_POSTGRES_USER}",
+        ]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+    volumes:
+      - ${VOLUME_BASE_PATH:-./volumes}/keycloak/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${KEYCLOAK_POSTGRES_DATABASE}
+    networks:
+      - internal
+
+  # --------------------------------------------------------------------------
+  # Keycloak Authentication Server
+  # --------------------------------------------------------------------------
+  keycloak:
+    image: keycloak/keycloak:26.3
+    restart: always
+    command: start
+    expose:
+      - 8080
+    environment:
+      KC_HOSTNAME: ${PROTOCOL}://${KEYCLOAK_SERVER_HOSTNAME}
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/${KEYCLOAK_POSTGRES_DATABASE}
+      KC_DB_USERNAME: ${KEYCLOAK_POSTGRES_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD}
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - traefik-proxy
+    volumes:
+      - ${VOLUME_BASE_PATH:-./volumes}/keycloak/export:/opt/keycloak/data/export
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.${STACK_NAME}-keycloak.rule=Host(`${KEYCLOAK_SERVER_HOSTNAME}`)"
+      - "traefik.http.routers.${STACK_NAME}-keycloak.entrypoints=https"
+      - "traefik.http.routers.${STACK_NAME}-keycloak.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${STACK_NAME}-keycloak.loadbalancer.server.port=8080"
+
+  # ==========================================================================
+  # 3. APPLICATION SERVICES
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # App Orchestrator Backend API (ASP.NET Core)
+  # --------------------------------------------------------------------------
+  app-orchestrator-server:
+    image: ${IMAGE_BASE_PATH}/apporchestrator-server:${ORCHESTRATOR_SERVER_TAG}
+    restart: always
+    expose:
+      - 80
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+      DOTNET_RUNNING_IN_CONTAINER: "true"
+      Keycloak__Host: ${PROTOCOL}://${KEYCLOAK_SERVER_HOSTNAME}
+      Keycloak__Realm: ${KEYCLOAK_REALM}
+      Keycloak__ClientId: ${KEYCLOAK_SERVER_CLIENT_ID}
+      Postgres__Host: app-orchestrator-postgres
+      Postgres__Port: 5432
+      Postgres__User: ${ORCHESTRATOR_POSTGRES_USER}
+      Postgres__Password: ${ORCHESTRATOR_POSTGRES_PASSWORD}
+      Postgres__Database: ${ORCHESTRATOR_POSTGRES_DATABASE}
+      Orchestrator__NetworkTraefik: traefik-proxy
+      Orchestrator__RootPath: /orchestrator
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VOLUME_BASE_PATH:-./volumes}/orchestrator/server:/orchestrator
+      - ${VOLUME_BASE_PATH:-./volumes}/orchestrator/docker-config:/root/.docker
+    depends_on:
+      app-orchestrator-postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.${STACK_NAME}-server.rule=Host(`${ORCHESTRATOR_SERVER_HOSTNAME}`)"
+      - "traefik.http.routers.${STACK_NAME}-server.entrypoints=https"
+      - "traefik.http.routers.${STACK_NAME}-server.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${STACK_NAME}-server.loadbalancer.server.port=80"
+
+  # --------------------------------------------------------------------------
+  # App Orchestrator Frontend Client (Vite/React)
+  # --------------------------------------------------------------------------
+  app-orchestrator-client:
+    image: ${IMAGE_BASE_PATH}/apporchestrator-client:${ORCHESTRATOR_CLIENT_TAG}
+    restart: always
+    expose:
+      - 80
+    environment:
+      - VITE_API_URL=${PROTOCOL}://${ORCHESTRATOR_SERVER_HOSTNAME}
+      - VITE_MOUNT_PATH=${MOUNT_ROUTE}
+      - VITE_KEYCLOAK_AUTHORITY=${PROTOCOL}://${KEYCLOAK_SERVER_HOSTNAME}/realms/${KEYCLOAK_REALM}
+      - VITE_KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_CLIENT_ID}
+    depends_on:
+      - app-orchestrator-server
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.${STACK_NAME}-client.rule=Host(`${ORCHESTRATOR_CLIENT_HOSTNAME}`)"
+      - "traefik.http.routers.${STACK_NAME}-client.entrypoints=https"
+      - "traefik.http.routers.${STACK_NAME}-client.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${STACK_NAME}-client.loadbalancer.server.port=80"
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  internal:
+  traefik-proxy:
+    name: ${TRAEFIK_NETWORK}
+    external: true
